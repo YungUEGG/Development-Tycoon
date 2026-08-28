@@ -1,0 +1,180 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+
+// 인스펙터 창에서 가로줄(Row) 1개당 슬롯 1개씩 매칭하기 위한 클래스입니다.
+[System.Serializable]
+public class UpgradeUI_Row
+{
+    [Header("UI 연결")]
+    public TextMeshProUGUI titleText;    // 예: "슬롯 1 게임 업데이트"
+    public TextMeshProUGUI verText;      // 예: "Ver 1.00" (선택 사항)
+    public TextMeshProUGUI costText;     // 예: "비용: 100 G"
+    public Button upgradeButton;         // 오른쪽 업데이트 버튼
+
+    [Header("업그레이드 설정")]
+    public int targetSlotIndex;          // 이 버튼이 업그레이드할 슬롯 번호 (0 = 슬롯 1, 1 = 슬롯 2 ...)
+    public double currentCost = 100;     // 초기 업데이트 비용
+    public float costMultiplier = 1.15f; // 클릭할 때마다 가격이 오르는 배율 (기본 1.15배)
+}
+
+public class UpgradeManager : MonoBehaviour
+{
+    [Header("연결할 매니저")]
+    public GameSlotManager slotManager;
+
+    [Header("개별 슬롯 업그레이드 항목 리스트")]
+    public List<UpgradeUI_Row> upgradeRows = new List<UpgradeUI_Row>();
+
+    void OnEnable()
+    {
+        if (slotManager != null)
+        {
+            slotManager.onSlotUpdated += RefreshAllRowsUI;
+        }
+    }
+
+    void OnDisable()
+    {
+        if (slotManager != null)
+        {
+            slotManager.onSlotUpdated -= RefreshAllRowsUI;
+        }
+    }
+
+    void Start()
+    {
+        // 각 가로줄 버튼마다 클릭 이벤트 연결하기
+        for (int i = 0; i < upgradeRows.Count; i++)
+        {
+            int index = i; // 람다 무명 함수용 지역 변수 복사
+            if (upgradeRows[i].upgradeButton != null)
+            {
+                upgradeRows[i].upgradeButton.onClick.AddListener(() => OnUpgradeClicked(index));
+            }
+        }
+
+        RefreshAllRowsUI();
+    }
+
+    // 특정 슬롯의 업데이트 버튼을 눌렀을 때 실행되는 함수
+    public void OnUpgradeClicked(int index)
+    {
+        if (slotManager == null || index < 0 || index >= upgradeRows.Count) return;
+
+        UpgradeUI_Row row = upgradeRows[index];
+        int slotIdx = row.targetSlotIndex;
+
+        // 1. 해당 슬롯 번호 유효성 검사
+        if (slotIdx < 0 || slotIdx >= slotManager.slots.Count) return;
+
+        GameData targetData = slotManager.slots[slotIdx];
+
+        // 2. 게임이 없거나 개발 중이면 업그레이드 안 함
+        if (targetData == null || string.IsNullOrEmpty(targetData.gameName) || targetData.gameName == "개발 중...")
+        {
+            return;
+        }
+
+        // 3. 보유 골드가 업그레이드 비용 이상인지 검사
+        if (slotManager.currentGold >= row.currentCost)
+        {
+            // 돈 차감 및 다음 업그레이드 비용 증가
+            slotManager.currentGold -= row.currentCost;
+            row.currentCost *= row.costMultiplier;
+
+            // 해당 슬롯의 레벨 1 증가 (GameUIManager에서 Ver X.XX로 자동 변환되어 보여집니다)
+            targetData.level++;
+
+            // 돈과 버전 데이터 갱신 알림
+            slotManager.onSlotUpdated?.Invoke();
+        }
+    }
+
+    // 모든 업그레이드 줄 UI를 최신 정보로 갱신
+    public void RefreshAllRowsUI()
+    {
+        for (int i = 0; i < upgradeRows.Count; i++)
+        {
+            UpdateRowUI(i);
+        }
+    }
+
+    // 특정 줄의 텍스트 및 버튼 활성화 상태를 갱신하는 함수
+    private void UpdateRowUI(int index)
+    {
+        if (index < 0 || index >= upgradeRows.Count) return;
+
+        UpgradeUI_Row row = upgradeRows[index];
+        int slotIdx = row.targetSlotIndex;
+
+        // 1. 제목 설정 (슬롯 1 게임 업데이트, 슬롯 2 게임 업데이트 ...)
+        if (row.titleText != null)
+        {
+            row.titleText.text = $"슬롯 {slotIdx + 1} 게임 업데이트";
+        }
+
+        // 2. 비용 표시
+        if (row.costText != null)
+        {
+            row.costText.text = "비용: " + FormatNumber(row.currentCost);
+        }
+
+        // 3. 해당 슬롯의 게임 존재 여부 및 해금 여부 체크
+        if (slotManager != null && slotIdx < slotManager.slots.Count)
+        {
+            GameData targetData = slotManager.slots[slotIdx];
+            bool isSlotUnlocked = (slotIdx < slotManager.isUnlocked.Count) ? slotManager.isUnlocked[slotIdx] : false;
+
+            if (!isSlotUnlocked)
+            {
+                if (row.verText != null) row.verText.text = "<color=#888888>(슬롯 잠김)</color>";
+                if (row.upgradeButton != null) row.upgradeButton.interactable = false;
+            }
+            else if (targetData == null || string.IsNullOrEmpty(targetData.gameName))
+            {
+                if (row.verText != null) row.verText.text = "<color=#888888>(빈 슬롯)</color>";
+                if (row.upgradeButton != null) row.upgradeButton.interactable = false;
+            }
+            else if (targetData.gameName == "개발 중...")
+            {
+                if (row.verText != null) row.verText.text = "<color=#FFFF00>(개발 중...)</color>";
+                if (row.upgradeButton != null) row.upgradeButton.interactable = false;
+            }
+            else
+            {
+                // 정상 출시된 게임이 있는 경우: 버전 표시 및 버튼 활성화
+                int baseLevel = targetData.level - 1;
+                int majorVer = 1 + (baseLevel / 100);
+                int minorVer = baseLevel % 100;
+
+                if (row.verText != null)
+                {
+                    row.verText.text = $"{targetData.gameName} <color=#00FF00>(Ver {majorVer}.{minorVer:D2})</color>";
+                }
+
+                // 골드가 부족하면 버튼만 누를 수 없도록 처리
+                if (row.upgradeButton != null)
+                {
+                    row.upgradeButton.interactable = (slotManager.currentGold >= row.currentCost);
+                }
+            }
+        }
+    }
+
+    // 숫자 단위 변환 헬퍼 함수 (K, M, B 등)
+    private string FormatNumber(double num)
+    {
+        if (num < 1000) return num.ToString("0");
+
+        string[] suffixes = { "", "K", "M", "B", "T", "Qa", "Qi" };
+        int suffixIndex = (int)(System.Math.Log10(num) / 3);
+
+        if (suffixIndex >= suffixes.Length) suffixIndex = suffixes.Length - 1;
+
+        double scaledNum = num / System.Math.Pow(1000, suffixIndex);
+        return scaledNum.ToString("0.00") + suffixes[suffixIndex];
+    }
+}
