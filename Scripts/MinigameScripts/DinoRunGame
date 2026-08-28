@@ -1,0 +1,293 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.InputSystem;
+using TMPro;
+
+public class DinoRunGame : MonoBehaviour
+{
+    [Header("UI 연결 (오브젝트)")]
+    public RectTransform dino;               // 공룡 캐릭터
+    public RectTransform ground;             // 바닥
+    public RectTransform[] obstacleColumns;  // 장애물들 (선인장, 지우개 똥 등)
+    public GameObject gameOverPanel;
+
+    [Header("공룡 스프라이트 애니메이션 설정")]
+    public Image dinoImage;                  // 공룡 Image 컴포넌트
+    public Sprite runSprite1;                // 달리기 1 (기본)
+    public Sprite runSprite2;                // 달리기 2
+    public Sprite jumpSprite;                // 점프 이미지
+    public float animFrameRate = 0.15f;      // 달리기 프레임 변경 간격
+
+    [Header("UI 연결 (텍스트)")]
+    public TextMeshProUGUI scoreText;
+    public TextMeshProUGUI finalScoreText;
+    public TextMeshProUGUI rewardText;
+
+    [Header("UI 연결 (버튼)")]
+    public Button restartButton;
+    public Button closeButton;
+    public Button inGameCloseButton;
+
+    [Header("게임 물리/밸런스 설정")]
+    public float gravity = 2500f;            // 중력
+    public float jumpForce = 900f;           // 점프 파워
+    public float baseObstacleSpeed = 500f;   // 초기 장애물 이동 속도
+    public float speedIncreaseRate = 10f;    // 시간이 지날수록 늘어나는 속도 증가량
+
+    [Header("장애물 소환 설정")]
+    public float minObstacleDistance = 500f; // 장애물 간 최소 간격
+    public float maxObstacleDistance = 800f; // 장애물 간 최대 간격
+    public float obstacleStartX = 700f;      // 리스폰 X 위치
+    public float obstacleResetX = -700f;     // 화면 왼쪽 밖 사라지는 X 위치
+
+    [Header("보상 밸런스 설정")]
+    public float rewardMultiplier = 2.0f;    // 미니게임 보상 배율
+
+    [Header("충돌 판정 설정")]
+    public float dinoCollisionRadius = 35f;  // 공룡 원형 충돌 범위
+
+    private float velocityY = 0f;
+    private float groundY = 0f;
+    private float currentObstacleSpeed = 500f;
+    private bool isGameOver = false;
+    private bool isGameStarted = false;
+    private bool isGrounded = true;
+    private float scoreTimer = 0f;
+    private int currentScore = 0;
+
+    private MiniGameManager miniGameManager;
+    private Vector2 initialDinoPos;
+    private Coroutine runAnimCoroutine;
+
+    void Awake()
+    {
+        if (dino != null)
+        {
+            initialDinoPos = dino.anchoredPosition;
+            groundY = initialDinoPos.y; // 초기 Y 좌표를 바닥 위치로 기억
+            if (dinoImage == null) dinoImage = dino.GetComponent<Image>();
+        }
+
+        if (restartButton != null) restartButton.onClick.AddListener(RestartGame);
+        if (closeButton != null) closeButton.onClick.AddListener(CloseGame);
+        if (inGameCloseButton != null) inGameCloseButton.onClick.AddListener(CloseGame);
+
+        miniGameManager = FindObjectOfType<MiniGameManager>();
+    }
+
+    public void StartGame()
+    {
+        isGameOver = false;
+        isGameStarted = true;
+        isGrounded = true;
+        velocityY = 0f;
+        scoreTimer = 0f;
+        currentScore = 0;
+        currentObstacleSpeed = baseObstacleSpeed;
+
+        if (gameOverPanel != null) gameOverPanel.SetActive(false);
+        if (scoreText != null) scoreText.text = "거리: 0m";
+
+        if (dino != null)
+        {
+            dino.anchoredPosition = initialDinoPos;
+        }
+
+        // 달리기 애니메이션 코루틴 시작
+        if (runAnimCoroutine != null) StopCoroutine(runAnimCoroutine);
+        runAnimCoroutine = StartCoroutine(RunAnimationRoutine());
+
+        // 장애물 위치 초기화 (랜덤 간격 배치)
+        if (obstacleColumns != null)
+        {
+            float lastX = obstacleStartX;
+            for (int i = 0; i < obstacleColumns.Length; i++)
+            {
+                if (obstacleColumns[i] != null)
+                {
+                    float dist = Random.Range(minObstacleDistance, maxObstacleDistance);
+                    lastX += dist;
+                    obstacleColumns[i].anchoredPosition = new Vector2(lastX, groundY);
+                }
+            }
+        }
+    }
+
+    public void RestartGame()
+    {
+        StartGame();
+    }
+
+    public void CloseGame()
+    {
+        isGameStarted = false;
+        isGameOver = true;
+
+        if (runAnimCoroutine != null) StopCoroutine(runAnimCoroutine);
+        if (gameOverPanel != null) gameOverPanel.SetActive(false);
+        gameObject.SetActive(false);
+
+        if (miniGameManager != null)
+        {
+            miniGameManager.CloseMiniGame();
+        }
+    }
+
+    void Update()
+    {
+        if (!isGameStarted || isGameOver) return;
+
+        // 점프 입력 체크
+        bool isJumpPressed = false;
+        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame) isJumpPressed = true;
+        if (Touchscreen.current != null && Touchscreen.current.primaryTouch.press.wasPressedThisFrame) isJumpPressed = true;
+        if (Keyboard.current != null && (Keyboard.current.spaceKey.wasPressedThisFrame || Keyboard.current.upArrowKey.wasPressedThisFrame)) isJumpPressed = true;
+
+        if (isJumpPressed && isGrounded)
+        {
+            velocityY = jumpForce;
+            isGrounded = false;
+            if (dinoImage != null && jumpSprite != null)
+            {
+                dinoImage.sprite = jumpSprite;
+            }
+        }
+
+        // 중력 적용 및 위치 이동
+        if (!isGrounded)
+        {
+            velocityY -= gravity * Time.deltaTime;
+            dino.anchoredPosition += new Vector2(0, velocityY * Time.deltaTime);
+
+            // 착지 검사
+            if (dino.anchoredPosition.y <= groundY)
+            {
+                dino.anchoredPosition = new Vector2(dino.anchoredPosition.x, groundY);
+                velocityY = 0f;
+                isGrounded = true;
+            }
+        }
+
+        // 시간이 지남에 따라 점수와 이동 속도 증가
+        currentObstacleSpeed += speedIncreaseRate * Time.deltaTime;
+        scoreTimer += Time.deltaTime * 10f; // 난이도에 맞게 달린 거리 산정
+        currentScore = (int)scoreTimer;
+        if (scoreText != null) scoreText.text = "거리: " + currentScore + "m";
+
+        // 장애물 이동 및 화면 밖 재배치
+        foreach (var obstacle in obstacleColumns)
+        {
+            if (obstacle == null) continue;
+
+            obstacle.anchoredPosition -= new Vector2(currentObstacleSpeed * Time.deltaTime, 0);
+
+            // 화면 왼쪽을 벗어난 경우 오른쪽 끝으로 재배치
+            if (obstacle.anchoredPosition.x < obstacleResetX)
+            {
+                float dist = Random.Range(minObstacleDistance, maxObstacleDistance);
+                // 가장 멀리 있는 장애물 위치 구하기
+                float maxX = obstacleResetX;
+                foreach (var other in obstacleColumns)
+                {
+                    if (other != null && other.anchoredPosition.x > maxX)
+                        maxX = other.anchoredPosition.x;
+                }
+                obstacle.anchoredPosition = new Vector2(maxX + dist, groundY);
+            }
+
+            // 장애물 충돌 검사
+            if (CheckCircleRectCollision(dino, dinoCollisionRadius, obstacle))
+            {
+                GameOver();
+                return;
+            }
+        }
+    }
+
+    private IEnumerator RunAnimationRoutine()
+    {
+        bool toggle = false;
+        while (isGameStarted && !isGameOver)
+        {
+            if (isGrounded && dinoImage != null && runSprite1 != null && runSprite2 != null)
+            {
+                dinoImage.sprite = toggle ? runSprite1 : runSprite2;
+                toggle = !toggle;
+            }
+            yield return new WaitForSeconds(animFrameRate);
+        }
+    }
+
+    private bool CheckCircleRectCollision(RectTransform circleObj, float radius, RectTransform rectObj)
+    {
+        Vector2 circleCenter = circleObj.position;
+        Vector3[] rectCorners = new Vector3[4];
+        rectObj.GetWorldCorners(rectCorners);
+
+        Rect rect = new Rect(rectCorners[0].x, rectCorners[0].y, rectCorners[2].x - rectCorners[0].x, rectCorners[2].y - rectCorners[0].y);
+
+        float closestX = Mathf.Clamp(circleCenter.x, rect.xMin, rect.xMax);
+        float closestY = Mathf.Clamp(circleCenter.y, rect.yMin, rect.yMax);
+
+        float distanceX = circleCenter.x - closestX;
+        float distanceY = circleCenter.y - closestY;
+
+        return (distanceX * distanceX + distanceY * distanceY) < (radius * radius);
+    }
+
+    private void GameOver()
+    {
+        isGameOver = true;
+        isGameStarted = false;
+
+        if (runAnimCoroutine != null) StopCoroutine(runAnimCoroutine);
+
+        double currentGps = 0.1;
+        if (miniGameManager != null && miniGameManager.slotManager != null)
+        {
+            if (miniGameManager.slotManager.currentGoldPerSec > 0)
+            {
+                currentGps = miniGameManager.slotManager.currentGoldPerSec;
+            }
+        }
+
+        double rewardGold = currentScore * currentGps * rewardMultiplier;
+        string achievedGrade = CalculateGrade(currentScore);
+
+        if (miniGameManager != null)
+        {
+            miniGameManager.GiveReward(rewardGold);
+            miniGameManager.UpdateGameGrade("달려라 공룡", achievedGrade);
+        }
+
+        if (finalScoreText != null) finalScoreText.text = "최종 달린 거리: " + currentScore + "m (달성 등급: " + achievedGrade + ")";
+        if (rewardText != null) rewardText.text = "획득 보상: " + FormatNumber(rewardGold) + " G";
+
+        if (gameOverPanel != null) gameOverPanel.SetActive(true);
+    }
+
+    private string CalculateGrade(int score)
+    {
+        if (score >= 500) return "SSS";
+        if (score >= 400) return "SS";
+        if (score >= 300) return "S";
+        if (score >= 200) return "A";
+        if (score >= 120) return "B";
+        if (score >= 80) return "C";
+        if (score >= 50) return "D";
+        if (score >= 20) return "E";
+        return "F";
+    }
+
+    private string FormatNumber(double num)
+    {
+        if (num < 1000) return num.ToString("0");
+        string[] suffixes = { "", "K", "M", "B", "T", "Qa", "Qi" };
+        int suffixIndex = (int)(System.Math.Log10(num) / 3);
+        if (suffixIndex >= suffixes.Length) suffixIndex = suffixes.Length - 1;
+        double scaledNum = num / System.Math.Pow(1000, suffixIndex);
+        return scaledNum.ToString("0.00") + suffixes[suffixIndex];
+    }
+}
