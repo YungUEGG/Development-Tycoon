@@ -1,0 +1,268 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+[System.Serializable]
+public class GameData
+{
+    public string gameName;       
+    public int level;             
+    public string grade;          
+    public double baseGoldPerSec; 
+}
+
+public class GameSlotManager : MonoBehaviour
+{
+    [Header("슬롯 설정")]
+    public int maxSlotCount = 27; 
+
+    [Header("슬롯 데이터 관리")]
+    public List<GameData> slots = new List<GameData>(); 
+
+    [Header("잠금 해제 시스템")]
+    public List<GameObject> lockPanels = new List<GameObject>(); 
+    public List<double> unlockCosts = new List<double>();
+    public List<bool> isUnlocked = new List<bool>(); 
+
+    // ★ 추가됨: 슬롯 위치별로 주어지는 기본 수익! (1번 10, 2번 30, 3번 90...)
+    [Header("슬롯별 고정 기본 수익")]
+    public List<double> slotBaseIncomes = new List<double>();
+
+    [Header("재화 관리")]
+    public double currentGold = 0; 
+    public double currentGoldPerSec = 0; 
+    public float globalIncomeMultiplier = 1.0f; // ★ 추가됨: 전체 수익 배율 (돈이 너무 잘 벌리면 0.5 등으로 낮추세요!)
+
+    // ★ 추가됨: 현재 '개발 중'인 게임 이름들을 기억하는 리스트 (중복 개발 방지용)
+    public List<string> developingGames = new List<string>();
+
+    public System.Action onSlotUpdated;
+
+    void Start()
+    {
+        InitializeSlots(); 
+        RefreshLockUI(); 
+        StartCoroutine(CalculateSlotIncome()); 
+    }
+
+    private void InitializeSlots()
+    {
+        slots.Clear();
+        for (int i = 0; i < maxSlotCount; i++)
+        {
+            slots.Add(null); 
+
+            if (isUnlocked.Count <= i)
+                isUnlocked.Add(i == 0 ? true : false); 
+
+            if (unlockCosts.Count <= i)
+            {
+                if (i == 0) unlockCosts.Add(0); 
+                else 
+                {
+                    double cost = 1000 * System.Math.Pow(3, i - 1);
+                    unlockCosts.Add(cost);
+                }
+            }
+            
+            // ★ 추가됨: 슬롯별 기본 수익 자동 계산 (인스펙터에서 직접 수정도 가능!)
+            // 0번 슬롯(1번 칸)은 10, 1번 슬롯은 30, 2번은 90...
+            if (slotBaseIncomes.Count <= i)
+            {
+                double baseIncome = 10 * System.Math.Pow(3, i);
+                slotBaseIncomes.Add(baseIncome);
+            }
+        }
+    }
+
+    // ★ 추가됨: 다음으로 들어갈 빈 슬롯의 번호를 찾아주는 도우미 함수
+    public int GetNextAvailableSlotIndex()
+    {
+        for (int i = 0; i < slots.Count; i++)
+        {
+            if (isUnlocked[i] && (slots[i] == null || string.IsNullOrEmpty(slots[i].gameName)))
+            {
+                return i;
+            }
+        }
+        return -1; // 빈 슬롯 없음
+    }
+
+    // ★ 수정됨: 개발 중인 게임 리스트도 검사하도록 업그레이드
+    public bool CheckGameExists(string checkName)
+    {
+        // 1. 현재 타이머가 돌아가고 있는 (개발 중인) 게임인가?
+        if (developingGames.Contains(checkName)) return true;
+
+        // 2. 이미 슬롯에 완성되어 있는 게임인가?
+        foreach (var slot in slots)
+        {
+            if (slot != null && slot.gameName == checkName)
+            {
+                return true; 
+            }
+        }
+        return false;
+    }
+
+    // ★ 수정됨: 어떤 게임이든 baseIncome은 안 받습니다. 슬롯이 알아서 정합니다.
+    public bool TryStartDevelopment(string newGameName, float devTime)
+    {
+        // 1. 빈 슬롯 찾기
+        int targetSlotIndex = GetNextAvailableSlotIndex();
+
+        if (targetSlotIndex == -1) return false; // 빈 슬롯 없음
+
+        // 2. 슬롯을 '개발 중' 상태로 예약하기
+        slots[targetSlotIndex] = new GameData 
+        { 
+            gameName = "개발 중...", 
+            level = 0, 
+            grade = "-", 
+            baseGoldPerSec = 0 
+        };
+        
+        // 개발 중 목록에 이름 등록
+        developingGames.Add(newGameName);
+
+        onSlotUpdated?.Invoke(); 
+
+        // 3. 타이머 돌리기 시작 (baseIncome 삭제)
+        StartCoroutine(DevTimerRoutine(targetSlotIndex, newGameName, devTime));
+        return true;
+    }
+
+    // ★ 수정됨: 파라미터에서 baseIncome을 빼고 안에서 슬롯 인덱스로 수익을 꺼내옵니다.
+    private IEnumerator DevTimerRoutine(int slotIndex, string finalName, float devTime)
+    {
+        yield return new WaitForSeconds(devTime);
+
+        // 개발 완료 시 개발 중 목록에서 제거
+        developingGames.Remove(finalName);
+
+        // ★ 핵심: 슬롯 번호(slotIndex)에 맞춰 준비된 수익(slotBaseIncomes)을 넣어줍니다!
+        slots[slotIndex] = new GameData 
+        { 
+            gameName = finalName, 
+            level = 1, 
+            grade = "F", 
+            baseGoldPerSec = slotBaseIncomes[slotIndex] 
+        };
+        
+        onSlotUpdated?.Invoke(); 
+    }
+
+    public void UnlockSlot(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= isUnlocked.Count) return;
+        if (isUnlocked[slotIndex]) return; 
+
+        double cost = unlockCosts[slotIndex];
+
+        if (currentGold >= cost)
+        {
+            currentGold -= cost; 
+            isUnlocked[slotIndex] = true; 
+            
+            RefreshLockUI(); 
+            onSlotUpdated?.Invoke(); 
+        }
+    }
+
+    public void RefreshLockUI()
+    {
+        for (int i = 0; i < lockPanels.Count; i++) 
+        {
+            if (lockPanels[i] != null)
+            {
+                lockPanels[i].SetActive(!isUnlocked[i]);
+            }
+        }
+    }
+
+    IEnumerator CalculateSlotIncome()
+    {
+        while (true)
+        {
+            yield return new WaitForSeconds(1f);
+            
+            double totalIncomeThisSecond = 0;
+
+            for (int i = 0; i < slots.Count; i++)
+            {
+                if (isUnlocked[i] && slots[i] != null && !string.IsNullOrEmpty(slots[i].gameName) && slots[i].level > 0)
+                {
+                    // ★ 수정됨: 수익 계산 식에서 slotPositionMultipliers 부분을 제거했습니다.
+                    double income = slots[i].baseGoldPerSec 
+                                  * (1 + (slots[i].level * 0.1f)) 
+                                  * GetGradeMultiplier(slots[i].grade)
+                                  * globalIncomeMultiplier; 
+                    
+                    totalIncomeThisSecond += income;
+                }
+            }
+
+            if (totalIncomeThisSecond > 0 || currentGoldPerSec != totalIncomeThisSecond)
+            {
+                currentGold += totalIncomeThisSecond;
+                currentGoldPerSec = totalIncomeThisSecond;
+                onSlotUpdated?.Invoke(); 
+            }
+        }
+    }
+
+    // ★ 미니게임 점수로 특정 게임의 등급을 승급시키는 함수 (기존 등급보다 높을 때만 적용)
+    public void UpdateGradeForGame(string targetGameName, string newGrade)
+    {
+        int newRank = GetGradeRank(newGrade);
+
+        foreach (var slot in slots)
+        {
+            if (slot != null && slot.gameName == targetGameName)
+            {
+                int currentRank = GetGradeRank(slot.grade);
+                
+                // 더 높은 등급 달성 시 승급!
+                if (newRank > currentRank)
+                {
+                    slot.grade = newGrade;
+                    onSlotUpdated?.Invoke();
+                }
+            }
+        }
+    }
+
+    private int GetGradeRank(string grade)
+    {
+        switch (grade)
+        {
+            case "SSS": return 8;
+            case "SS": return 7;
+            case "S": return 6;
+            case "A": return 5;
+            case "B": return 4;
+            case "C": return 3;
+            case "D": return 2;
+            case "E": return 1;
+            case "F": return 0;
+            default: return 0;
+        }
+    }
+
+    private float GetGradeMultiplier(string grade)
+    {
+        switch (grade)
+        {
+            case "SSS": return 2.0f;
+            case "SS": return 1.75f;
+            case "S": return 1.6f;
+            case "A": return 1.5f;
+            case "B": return 1.25f;
+            case "C": return 1.0f;
+            case "D": return 0.95f;
+            case "E": return 0.9f;
+            case "F": return 0.8f;
+            default: return 0.8f;
+        }
+    }
+}
