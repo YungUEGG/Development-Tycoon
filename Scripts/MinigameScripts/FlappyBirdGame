@@ -1,0 +1,309 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.InputSystem; 
+using TMPro;
+
+public class FlappyBirdGame : MonoBehaviour
+{
+    [Header("UI 연결 (오브젝트)")]
+    public RectTransform bird;
+    public RectTransform ground;
+    public RectTransform[] pipeColumns;
+    public GameObject gameOverPanel;
+
+    [Header("새 스프라이트 애니메이션 설정")]
+    public Image birdImage;               // 새의 Image 컴포넌트
+    public Sprite defaultSprite;          // 날개 내린 모습 (기본/하강)
+    public Sprite flapSprite;             // 날개 올린 모습 (점프)
+    public float flapAnimDuration = 0.15f; // 날개 올린 유지 시간(초)
+
+    [Header("UI 연결 (텍스트)")]
+    public TextMeshProUGUI scoreText;
+    public TextMeshProUGUI finalScoreText;
+    public TextMeshProUGUI rewardText;
+
+    [Header("UI 연결 (버튼)")]
+    public Button restartButton;       
+    public Button closeButton;         
+    public Button inGameCloseButton;   
+
+    [Header("게임 물리/밸런스 설정")]
+    public float gravity = 2000f;      
+    public float jumpForce = 800f;     
+    public float pipeSpeed = 400f;     
+
+    [Header("파이프 소환 설정")]
+    public float pipeDistance = 600f;  
+    public float pipeMinY = -350f;     
+    public float pipeMaxY = 450f;      
+    public float pipeStartX = -700f;   
+
+    [Header("보상 밸런스 설정")] // ★ 추가됨: 미니게임 보상 뻥튀기 방지용
+    public float rewardMultiplier = 2.0f; // 기본 10에서 2로 줄였습니다. (인스펙터 조절 가능)
+
+    [Header("충돌 판정 설정")] // ★ 추가됨: 원형 충돌 판정용 설정
+    public float birdCollisionRadius = 40f; // 새의 둥근 충돌 범위 (인스펙터에서 새 크기에 맞게 조절하세요!)
+
+    private float velocityY = 0f;
+    private bool isGameOver = false;
+    private bool isGameStarted = false;
+    private int currentScore = 0;
+
+    private MiniGameManager miniGameManager;
+    private Vector2 initialBirdPos;
+    private Coroutine flapCoroutine; // 날개 짓 애니메이션 코루틴 기억용
+
+    void Awake()
+    {
+        if (bird != null) 
+        {
+            initialBirdPos = bird.anchoredPosition;
+            // birdImage가 미지정된 경우 자동 탐색
+            if (birdImage == null) birdImage = bird.GetComponent<Image>();
+        }
+
+        // ★ 추가됨: 리플레이 및 닫기 버튼들에 클릭 이벤트 연결
+        if (restartButton != null) restartButton.onClick.AddListener(RestartGame);
+        if (closeButton != null) closeButton.onClick.AddListener(CloseGame);
+        if (inGameCloseButton != null) inGameCloseButton.onClick.AddListener(CloseGame);
+    }
+
+    public void StartGame()
+    {
+        isGameOver = false;
+        isGameStarted = true;
+        velocityY = 0f;
+        currentScore = 0;
+
+        if (gameOverPanel != null) gameOverPanel.SetActive(false);
+        if (scoreText != null) scoreText.text = "점수: 0";
+
+        if (bird != null) 
+        {
+            bird.anchoredPosition = initialBirdPos;
+            bird.localRotation = Quaternion.identity; // 회전 각도 초기화
+        }
+
+        // 스프라이트 기본으로 초기화
+        if (birdImage != null && defaultSprite != null)
+        {
+            birdImage.sprite = defaultSprite;
+        }
+
+        if (pipeColumns != null)
+        {
+            for (int i = 0; i < pipeColumns.Length; i++)
+            {
+                if (pipeColumns[i] != null)
+                {
+                    float startX = 800f + (i * pipeDistance); 
+                    float randomY = Random.Range(pipeMinY, pipeMaxY);
+                    pipeColumns[i].anchoredPosition = new Vector2(startX, randomY);
+                }
+            }
+        }
+    }
+
+    public void RestartGame()
+    {
+        StartGame();
+    }
+
+    public void CloseGame()
+    {
+        isGameStarted = false;
+        isGameOver = true;
+
+        if (gameOverPanel != null) gameOverPanel.SetActive(false);
+        gameObject.SetActive(false); 
+
+        if (miniGameManager != null)
+        {
+            miniGameManager.CloseMiniGame(); 
+        }
+    }
+
+    void Update()
+    {
+        if (!isGameStarted || isGameOver) return;
+
+        // 입력을 받아 점프 처리
+        bool isJumpPressed = false;
+        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame) isJumpPressed = true;
+        if (Touchscreen.current != null && Touchscreen.current.primaryTouch.press.wasPressedThisFrame) isJumpPressed = true;
+        if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame) isJumpPressed = true;
+
+        if (isJumpPressed)
+        {
+            velocityY = jumpForce;
+
+            // 점프 시 날개 펄럭이는 애니메이션 실행
+            if (flapCoroutine != null) StopCoroutine(flapCoroutine);
+            flapCoroutine = StartCoroutine(FlapAnimationRoutine());
+        }
+
+        // 중력 적용 및 새 이동
+        velocityY -= gravity * Time.deltaTime;
+        bird.anchoredPosition += new Vector2(0, velocityY * Time.deltaTime);
+
+        // 속도에 따른 새 회전 연출 (상승 시 위를 보고, 하강 시 아래를 봄)
+        if (bird != null)
+        {
+            float targetAngle = Mathf.Clamp(velocityY * 0.04f, -60f, 30f);
+            bird.localRotation = Quaternion.Euler(0, 0, targetAngle);
+        }
+
+        // 파이프 이동 및 무한 반복 생성
+        foreach (var pipe in pipeColumns)
+        {
+            if (pipe == null) continue;
+
+            // 파이프 좌측 이동
+            pipe.anchoredPosition -= new Vector2(pipeSpeed * Time.deltaTime, 0);
+
+            // 파이프가 화면 왼쪽 밖으로 나가면 오른쪽 끝으로 재배치 및 점수 획득
+            if (pipe.anchoredPosition.x < pipeStartX)
+            {
+                float newX = pipe.anchoredPosition.x + (pipeDistance * pipeColumns.Length);
+                float randomY = Random.Range(pipeMinY, pipeMaxY);
+                pipe.anchoredPosition = new Vector2(newX, randomY);
+
+                currentScore++;
+                if (scoreText != null) scoreText.text = "점수: " + currentScore;
+            }
+
+            // ★ 수정됨: 부모 파이프 전체가 아니라, 자식 파이프(위/아래 파이프) 각각과 충돌 검사
+            bool isHitPipe = false;
+            for (int i = 0; i < pipe.childCount; i++)
+            {
+                RectTransform childPipe = pipe.GetChild(i) as RectTransform;
+                if (childPipe != null && childPipe.gameObject.activeSelf)
+                {
+                    if (CheckCircleRectCollision(bird, birdCollisionRadius, childPipe))
+                    {
+                        isHitPipe = true;
+                        break;
+                    }
+                }
+            }
+
+            if (isHitPipe)
+            {
+                GameOver();
+                return;
+            }
+        }
+
+        // 바닥 충돌 검사
+        if (ground != null && CheckCircleRectCollision(bird, birdCollisionRadius, ground))
+        {
+            GameOver();
+            return;
+        }
+    }
+
+    // ★ 삭제됨: 기존 네모 vs 네모 충돌 함수 (CheckCollision) 삭제
+    
+    // ★ 추가됨: 원(새) vs 네모(파이프, 바닥) 충돌 검사 함수
+    private bool CheckCircleRectCollision(RectTransform circleObj, float radius, RectTransform rectObj)
+    {
+        // 1. 새 중심 위치 (월드 좌표)
+        Vector2 circleCenter = circleObj.position;
+        
+        // 2. 파이프/바닥의 네 모서리 위치 구하기
+        Vector3[] rectCorners = new Vector3[4];
+        rectObj.GetWorldCorners(rectCorners);
+
+        // 왼쪽 아래(0), 오른쪽 위(2) 좌표로 네모 영역(Rect) 생성
+        Rect rect = new Rect(rectCorners[0].x, rectCorners[0].y, rectCorners[2].x - rectCorners[0].x, rectCorners[2].y - rectCorners[0].y);
+
+        // 3. 네모 안에서 원 중심과 가장 가까운 점(Closest Point) 찾기
+        float closestX = Mathf.Clamp(circleCenter.x, rect.xMin, rect.xMax);
+        float closestY = Mathf.Clamp(circleCenter.y, rect.yMin, rect.yMax);
+
+        // 4. 원 중심과 그 가장 가까운 점 사이의 거리 계산
+        float distanceX = circleCenter.x - closestX;
+        float distanceY = circleCenter.y - closestY;
+
+        // 거리가 반지름보다 작으면 충돌! (피타고라스 정리 사용)
+        return (distanceX * distanceX + distanceY * distanceY) < (radius * radius);
+    }
+
+    // 점프 시 날개를 펄럭이는 코루틴
+    private IEnumerator FlapAnimationRoutine()
+    {
+        if (birdImage != null && flapSprite != null)
+        {
+            birdImage.sprite = flapSprite; // 날개 올린 이미지로 변경
+        }
+
+        yield return new WaitForSeconds(flapAnimDuration); // 지정한 시간만큼 유지
+
+        if (birdImage != null && defaultSprite != null)
+        {
+            birdImage.sprite = defaultSprite; // 다시 기본 이미지로 복귀
+        }
+    }
+
+    private void GameOver()
+    {
+        isGameOver = true;
+        isGameStarted = false;
+
+        // 현재 초당 벌어들이는 돈(GPS) 가져오기 (게임 극초반 0일 경우 기본값 0.1 보장)
+        double currentGps = 0.1;
+        if (miniGameManager != null && miniGameManager.slotManager != null)
+        {
+            if (miniGameManager.slotManager.currentGoldPerSec > 0)
+            {
+                currentGps = miniGameManager.slotManager.currentGoldPerSec;
+            }
+        }
+
+        // ★ 수정됨: 인스펙터에서 설정한 배율(rewardMultiplier)을 곱해줍니다. (기존 * 10 제거)
+        double rewardGold = currentScore * currentGps * rewardMultiplier;
+
+        // ★ 점수에 따른 등급 산정
+        string achievedGrade = CalculateGrade(currentScore);
+
+        if (miniGameManager != null)
+        {
+            miniGameManager.GiveReward(rewardGold);
+            miniGameManager.UpdateGameGrade("파닥파닥 새", achievedGrade);
+        }
+
+        if (finalScoreText != null) finalScoreText.text = "최종 점수: " + currentScore + " (달성 등급: " + achievedGrade + ")";
+        if (rewardText != null) rewardText.text = "획득 보상: " + FormatNumber(rewardGold) + " G";
+
+        if (gameOverPanel != null)
+        {
+            gameOverPanel.SetActive(true);
+        }
+    }
+
+    // 점수에 따른 등급 판정 함수
+    private string CalculateGrade(int score)
+    {
+        if (score >= 80) return "SSS";
+        if (score >= 65) return "SS";
+        if (score >= 50) return "S";
+        if (score >= 35) return "A";
+        if (score >= 20) return "B";
+        if (score >= 15) return "C";
+        if (score >= 10) return "D";
+        if (score >= 5) return "E";
+        return "F";
+    }
+
+    private string FormatNumber(double num)
+    {
+        if (num < 1000) return num.ToString("0");
+        string[] suffixes = { "", "K", "M", "B", "T", "Qa", "Qi" };
+        int suffixIndex = (int)(System.Math.Log10(num) / 3);
+        if (suffixIndex >= suffixes.Length) suffixIndex = suffixes.Length - 1;
+        double scaledNum = num / System.Math.Pow(1000, suffixIndex);
+        return scaledNum.ToString("0.00") + suffixes[suffixIndex];
+    }
+}
