@@ -1,0 +1,52 @@
+using UnityEngine;
+
+public class NavigationManager : MonoBehaviour
+{
+    [Header("하단 탭 화면 연결")]
+    public GameObject gamePanel;      // 게임 탭 (슬롯 화면)
+    public GameObject upgradePanel;   // 업그레이드 탭
+    public GameObject rankingPanel;   // 랭킹 탭
+    public GameObject shopPanel;      // 상점 탭
+
+    void Start()
+    {
+        // 게임 시작 시 무조건 '게임 탭'이 켜진 상태로 시작하게 설정
+        ShowGameTab();
+    }
+
+    // 1. 게임 버튼 클릭 시
+    public void ShowGameTab()
+    {
+        gamePanel.SetActive(true);
+        upgradePanel.SetActive(false);
+        rankingPanel.SetActive(false);
+        shopPanel.SetActive(false);
+    }
+
+    // 2. 업그레이드 버튼 클릭 시
+    public void ShowUpgradeTab()
+    {
+        gamePanel.SetActive(false);
+        upgradePanel.SetActive(true);
+        rankingPanel.SetActive(false);
+        shopPanel.SetActive(false);
+    }
+
+    // 3. 랭킹 버튼 클릭 시
+    public void ShowRankingTab()
+    {
+        gamePanel.SetActive(false);
+        upgradePanel.SetActive(false);
+        rankingPanel.SetActive(true);
+        shopPanel.SetActive(false);
+    }
+
+    // 4. 상점 버튼 클릭 시
+    public void ShowShopTab()
+    {
+        gamePanel.SetActive(false);
+        upgradePanel.SetActive(false);
+        rankingPanel.SetActive(false);
+        shopPanel.SetActive(true);
+    }
+}
