@@ -1,0 +1,306 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI; 
+using TMPro; 
+
+public class DevelopmentManager : MonoBehaviour
+{
+    [Header("UI 그룹 (줄 전체 묶음)")]
+    public GameObject row2Group; 
+    public GameObject row3Group; 
+
+    [Header("버튼 배열")]
+    public Button[] row1Buttons;
+    public Button[] row2Buttons;
+    public Button[] row3Buttons;
+
+    [Header("새로 추가된 버튼 연결")]
+    public Button startDevButton; 
+    public Button closeButton;    
+
+    [Header("결과 텍스트")]
+    public TextMeshProUGUI resultText;
+
+    // ★ 삭제됨: 이전에 만들었던 게임별 수익 설정(GameIncomeData) 리스트는 완전히 삭제했습니다!
+
+    private GameSlotManager slotManager; // 남은 게임 검사기
+
+    private int selectedGenreIndex = -1;
+    private int selectedMechanicIndex = -1;
+    private int selectedThemeIndex = -1; 
+
+    private string[] genres = { "아케이드", "퍼즐", "캐주얼" };
+
+    private string[][] mechanics = {
+        new string[] { "점프", "피하기", "타격" },       
+        new string[] { "블록", "숫자", "매치" },         
+        new string[] { "타이밍", "클릭", "기억력" }      
+    };
+
+    private string[][][] themes = {
+        new string[][] {
+            new string[] { "장애물", "스피드", "층수" }, 
+            new string[] { "낙하물", "꼬리", "사방" },   
+            new string[] { "반사", "조준", "우주" }      
+        },
+        new string[][] {
+            new string[] { "낙하", "밀기", "그리기" },   
+            new string[] { "합치기", "지뢰", "스도쿠" }, 
+            new string[] { "3개", "선긋기", "터치" }     
+        },
+        new string[][] {
+            new string[] { "멈추기", "쌓기", "건너기" }, 
+            new string[] { "몬스터", "광물", "요리" },   
+            new string[] { "카드", "순서", "컵" }        
+        }
+    };
+
+    private string[][][] results = {
+        new string[][] {
+            new string[] { "파닥파닥 새", "달려라 공룡", "무한 계단" },
+            new string[] { "똥 피하기", "꼬리물기 지렁이", "탄막 생존" },
+            new string[] { "벽돌 깨기", "단검 꽂기", "우주 침략자" }
+        },
+        new string[][] {
+            new string[] { "짝퉁 테트리스", "창고지기", "한 붓 그리기" },
+            new string[] { "2048", "지뢰 찾기", "스도쿠" },
+            new string[] { "캔디 크러시 류", "사천성", "팝스타" }
+        },
+        new string[][] {
+            new string[] { "룰렛 멈추기", "흔들리는 탑", "통나무 건너기" },
+            new string[] { "화면 연타 사냥", "화면 연타 채광", "팬케이크 뒤집기" },
+            new string[] { "카드 짝맞추기", "순서 기억하기", "야바위" }
+        }
+    };
+
+    private GameSlotManager GetSlotManager()
+    {
+        if (slotManager == null)
+            slotManager = FindObjectOfType<GameSlotManager>();
+        return slotManager;
+    }
+
+    void OnEnable()
+    {
+        ResetUI();
+    }
+
+    void Start()
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            int index = i; 
+            row1Buttons[i].onClick.AddListener(() => OnRow1Click(index));
+            row2Buttons[i].onClick.AddListener(() => OnRow2Click(index));
+            row3Buttons[i].onClick.AddListener(() => OnRow3Click(index));
+        }
+
+        if (startDevButton != null) startDevButton.onClick.AddListener(OnStartDevClick);
+        if (closeButton != null) closeButton.onClick.AddListener(CloseUI);
+    }
+
+    // --- ★ 추가됨: 이미 만든 게임인지 검사하는 도구들 ---
+    bool IsThemeAvailable(int genre, int mechanic, int theme)
+    {
+        string gameName = results[genre][mechanic][theme];
+        return !GetSlotManager().CheckGameExists(gameName);
+    }
+
+    bool IsMechanicAvailable(int genre, int mechanic)
+    {
+        // 3개의 테마 중 단 하나라도 만들 수 있으면 이 방식(Mechanic)은 켜둡니다!
+        return IsThemeAvailable(genre, mechanic, 0) || 
+               IsThemeAvailable(genre, mechanic, 1) || 
+               IsThemeAvailable(genre, mechanic, 2);
+    }
+
+    bool IsGenreAvailable(int genre)
+    {
+        // 3개의 방식 중 단 하나라도 남아있으면 이 장르(Genre)는 켜둡니다!
+        return IsMechanicAvailable(genre, 0) || 
+               IsMechanicAvailable(genre, 1) || 
+               IsMechanicAvailable(genre, 2);
+    }
+    // --------------------------------------------------
+
+    void OnRow1Click(int index)
+    {
+        selectedGenreIndex = index;
+        selectedMechanicIndex = -1; 
+        selectedThemeIndex = -1;
+
+        for (int i = 0; i < 3; i++)
+        {
+            if (row1Buttons[i].gameObject.activeSelf) // 켜져있는 버튼만 색상 변경
+            {
+                TextMeshProUGUI btnText = row1Buttons[i].GetComponentInChildren<TextMeshProUGUI>();
+                if (i == index) btnText.text = genres[i] + "\n<size=70%><color=#FFFF00>(선택됨)</color></size>";
+                else btnText.text = genres[i];
+            }
+        }
+
+        for (int i = 0; i < 3; i++)
+        {
+            // ★ 하위 항목이 다 떨어졌으면 버튼 자체를 숨김 처리!
+            if (IsMechanicAvailable(selectedGenreIndex, i))
+            {
+                row2Buttons[i].gameObject.SetActive(true);
+                row2Buttons[i].GetComponentInChildren<TextMeshProUGUI>().text = mechanics[selectedGenreIndex][i];
+            }
+            else
+            {
+                row2Buttons[i].gameObject.SetActive(false);
+            }
+        }
+        
+        row2Group.SetActive(true); 
+        row3Group.SetActive(false); 
+        startDevButton.gameObject.SetActive(false); 
+        resultText.text = "두 번째 핵심 방식을 선택하세요.";
+    }
+
+    void OnRow2Click(int index)
+    {
+        selectedMechanicIndex = index;
+        selectedThemeIndex = -1;
+
+        for (int i = 0; i < 3; i++)
+        {
+            if (row2Buttons[i].gameObject.activeSelf)
+            {
+                TextMeshProUGUI btnText = row2Buttons[i].GetComponentInChildren<TextMeshProUGUI>();
+                if (i == index) btnText.text = mechanics[selectedGenreIndex][i] + "\n<size=70%><color=#FFFF00>(선택됨)</color></size>";
+                else btnText.text = mechanics[selectedGenreIndex][i];
+            }
+        }
+
+        for (int i = 0; i < 3; i++)
+        {
+            // ★ 이미 만든 테마면 버튼 숨김!
+            if (IsThemeAvailable(selectedGenreIndex, selectedMechanicIndex, i))
+            {
+                row3Buttons[i].gameObject.SetActive(true);
+                row3Buttons[i].GetComponentInChildren<TextMeshProUGUI>().text = themes[selectedGenreIndex][selectedMechanicIndex][i];
+            }
+            else
+            {
+                row3Buttons[i].gameObject.SetActive(false);
+            }
+        }
+        
+        row3Group.SetActive(true); 
+        startDevButton.gameObject.SetActive(false); 
+        resultText.text = "마지막 테마를 선택하세요.";
+    }
+
+    void OnRow3Click(int index)
+    {
+        selectedThemeIndex = index;
+
+        for (int i = 0; i < 3; i++)
+        {
+            if (row3Buttons[i].gameObject.activeSelf)
+            {
+                TextMeshProUGUI btnText = row3Buttons[i].GetComponentInChildren<TextMeshProUGUI>();
+                if (i == index) btnText.text = themes[selectedGenreIndex][selectedMechanicIndex][i] + "\n<size=70%><color=#FFFF00>(선택됨)</color></size>";
+                else btnText.text = themes[selectedGenreIndex][selectedMechanicIndex][i];
+            }
+        }
+
+        string finalGameName = results[selectedGenreIndex][selectedMechanicIndex][index];
+        
+        // ★ 수정됨: 선택한 게임 이름이 아니라 "빈 슬롯의 위치"를 기준으로 수익을 보여줍니다.
+        GameSlotManager sm = GetSlotManager();
+        int nextSlot = sm.GetNextAvailableSlotIndex();
+
+        if (nextSlot != -1)
+        {
+            double expectedIncome = sm.slotBaseIncomes[nextSlot];
+            resultText.text = $"<color=#00FF00>개발 가능!</color>\n{finalGameName}\n<size=80%>(슬롯 {nextSlot + 1} 적용 수익: {FormatNumber(expectedIncome)}/초)</size>";
+            startDevButton.gameObject.SetActive(true); 
+        }
+        else
+        {
+            resultText.text = $"<color=#FF0000>빈 슬롯이 없습니다!</color>\n{finalGameName}";
+            startDevButton.gameObject.SetActive(false); 
+        }
+    }
+
+    // ★ 추가됨: 큰 숫자를 예쁘게(1.5K 등으로) 변환해주는 헬퍼 함수
+    private string FormatNumber(double num)
+    {
+        if (num < 1000) return num.ToString("0");
+        string[] suffixes = { "", "K", "M", "B", "T", "Qa", "Qi" };
+        int suffixIndex = (int)(System.Math.Log10(num) / 3); 
+        if (suffixIndex >= suffixes.Length) suffixIndex = suffixes.Length - 1;
+        double scaledNum = num / System.Math.Pow(1000, suffixIndex);
+        return scaledNum.ToString("0.00") + suffixes[suffixIndex];
+    }
+
+    void OnStartDevClick()
+    {
+        string finalGameName = results[selectedGenreIndex][selectedMechanicIndex][selectedThemeIndex];
+        
+        GameSlotManager sm = GetSlotManager();
+        
+        if (sm != null)
+        {
+            float devTime = 3.0f; 
+            
+            // ★ 수정됨: 고정 수익값을 넘겨주던 것을 빼고 이름과 시간만 넘깁니다.
+            bool isStarted = sm.TryStartDevelopment(finalGameName, devTime);
+            
+            if (isStarted)
+            {
+                CloseUI(); 
+            }
+            else
+            {
+                resultText.text = "<color=#FF0000>빈 슬롯이 부족합니다!</color>";
+            }
+        }
+    }
+
+    void CloseUI()
+    {
+        gameObject.SetActive(false);
+    }
+
+    void ResetUI()
+    {
+        row2Group.SetActive(false);
+        row3Group.SetActive(false);
+        
+        if (startDevButton != null) startDevButton.gameObject.SetActive(false);
+        
+        bool isAnyGameLeft = false;
+
+        for (int i = 0; i < 3; i++)
+        {
+            if (row1Buttons[i] != null)
+            {
+                // ★ 장르 검사: 해당 장르의 하위 게임이 하나라도 남아있으면 버튼 켬
+                if (IsGenreAvailable(i))
+                {
+                    row1Buttons[i].gameObject.SetActive(true);
+                    row1Buttons[i].GetComponentInChildren<TextMeshProUGUI>().text = genres[i];
+                    isAnyGameLeft = true; // 뭐라도 만들게 남아있음!
+                }
+                else
+                {
+                    row1Buttons[i].gameObject.SetActive(false); // 다 만들었으면 장르 버튼 파괴!
+                }
+            }
+        }
+
+        if (isAnyGameLeft)
+        {
+            resultText.text = "어떤 게임을 기획하시겠습니까?";
+        }
+        else
+        {
+            resultText.text = "<color=#FFFF00>축하합니다!\n모든 종류의 게임을 개발했습니다!</color>";
+        }
+    }
+}
