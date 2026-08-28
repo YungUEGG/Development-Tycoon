@@ -1,0 +1,72 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+// 여러 개의 미니게임을 켜고 끄며 본 게임과 연결해 주는 다리 역할입니다.
+public class MiniGameManager : MonoBehaviour
+{
+    [Header("전체 미니게임 창(검은 배경)")]
+    public GameObject miniGamePanel;
+
+    [Header("게임별 로직 스크립트 연결")]
+    public FlappyBirdGame flappyBirdGame;
+    public DinoRunGame dinoRunGame; // ★ 추가됨: 달려라 공룡 스크립트 연결
+    // 나중에 다른 게임이 생기면 여기에 public OOOOgame 추가!
+
+    [Header("돈을 주기 위한 매니저 연결")]
+    public GameSlotManager slotManager;
+
+    // 슬롯에서 "파닥파닥 새" 플레이 버튼을 누르면 이 함수가 실행됩니다.
+    public void OpenFlappyBird()
+    {
+        // 1. 미니게임 전체 팝업 창 켜기
+        miniGamePanel.SetActive(true);
+        
+        // 2. 파닥파닥 새 UI 화면 켜기
+        flappyBirdGame.gameObject.SetActive(true);
+        if (dinoRunGame != null) dinoRunGame.gameObject.SetActive(false);
+        
+        // 3. 파닥파닥 새 게임 시작!
+        flappyBirdGame.StartGame();
+    }
+
+    // ★ 추가됨: "달려라 공룡" 플레이 버튼용 함수
+    public void OpenDinoRun()
+    {
+        miniGamePanel.SetActive(true);
+        if (flappyBirdGame != null) flappyBirdGame.gameObject.SetActive(false);
+
+        if (dinoRunGame != null)
+        {
+            dinoRunGame.gameObject.SetActive(true);
+            dinoRunGame.StartGame();
+        }
+    }
+
+    // 미니게임 창 닫기 버튼용
+    public void CloseMiniGame()
+    {
+        miniGamePanel.SetActive(false);
+    }
+
+    // 미니게임에서 게임오버 시 보상(Gold)을 지급하는 함수 (double 지원)
+    public void GiveReward(double goldAmount)
+    {
+        if (slotManager != null)
+        {
+            slotManager.currentGold += goldAmount;
+            
+            // 돈이 올랐으니 화면 갱신 알림
+            slotManager.onSlotUpdated?.Invoke(); 
+        }
+    }
+
+    // 미니게임 점수에 따라 게임의 등급을 올려주는 함수
+    public void UpdateGameGrade(string gameName, string newGrade)
+    {
+        if (slotManager != null)
+        {
+            slotManager.UpdateGradeForGame(gameName, newGrade);
+        }
+    }
+}
